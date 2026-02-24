@@ -2,11 +2,26 @@
 
 End-to-end analytical pipeline built on the Olist Brazilian e-commerce dataset.
 
-The goal of this project is to transform raw transactional data into a structured,
-auditable analytical layer that supports business-level revenue and lifecycle analysis.
+The project transforms raw transactional CSV data into a structured and validated analytical layer using DuckDB and SQL.
 
-This is not a dashboard project.
-The focus is on data correctness, modeling decisions, and explicit analytical reasoning.
+The focus is on data correctness, modeling discipline, and explicit analytical decisions.
+
+🇫🇮 Finnish summary: [README.fi.md](README.fi.md)
+
+---
+
+## TLDR
+
+This project demonstrates:
+
+- Deterministic data ingestion into DuckDB  
+- Explicit reconciliation of data inconsistencies  
+- Canonical fact table modeling  
+- Dimension tables with verified grain  
+- Revenue consistency validation  
+- A final KPI summary table for business-level insight  
+
+The result is a fully reproducible analytics engineering pipeline from raw data to executive-level metrics.
 
 ---
 
@@ -14,128 +29,214 @@ The focus is on data correctness, modeling decisions, and explicit analytical re
 
 Source: Kaggle – Olist Brazilian E-commerce dataset  
 Time range: 2016–2018  
-Size: ~100k orders
+Size: approximately 100,000 orders  
 
-The dataset contains:
+Main tables:
 
-- orders
-- order_items
-- order_payments
-- order_reviews
-- customers
-- sellers
-- products
-- geolocation
+- orders  
+- order_items  
+- order_payments  
+- order_reviews  
+- customers  
+- sellers  
+- products  
+- geolocation  
 
 ---
 
-## Project Architecture
+## Architecture
 
 The project follows a layered structure.
 
-data/raw  
-Raw CSV files downloaded from Kaggle. Never modified.
+### data/raw  
+Original CSV files. Never modified.
 
-data/processed  
+### data/processed  
 DuckDB database generated from raw data.
 
-src  
-Python scripts responsible for ingestion.
+### src  
+Python ingestion script. Responsible only for loading data.
 
-sql  
-Analytical SQL queries and modeling steps.
+### sql  
+Structured into:
 
-reports  
-Markdown documentation of each analytical decision.
+- staging  
+- marts  
+- checks  
+
+### reports  
+Markdown documentation for each modeling decision.
 
 ---
 
-## Current Pipeline Status
+## Pipeline Overview
 
 ### 1. Ingest Layer
 
 Script: `src/01_ingest_duckdb.py`
 
-- Loads all raw CSV files into DuckDB
-- Creates one table per dataset
-- Performs basic row-count validation
-- Verifies relationship between orders and order_items
+- Loads all CSV files into DuckDB  
+- Creates one table per dataset  
+- Validates row counts  
+- Verifies relationship between orders and order_items  
 
 Result:
-- 99,441 total orders
-- 775 orders without item rows
+- 99,441 total orders  
+- 775 orders without item rows  
+
+No business filtering occurs at this stage.
 
 ---
 
-### 2. Reconciliation Analysis
+### 2. Reconciliation
 
-File: `sql/00_reconcile_orders_vs_items.sql`  
+File: `sql/staging/00_reconcile_orders_vs_items.sql`  
 Report: `reports/00_reconciliation.md`
 
-Goal:
-Investigate orders that exist in `orders` but have no matching rows in `order_items`.
+Purpose:
+Investigate orders that exist in `orders` but not in `order_items`.
 
 Finding:
-775 orders have no associated item rows.
-These orders are excluded from analytical fact tables.
+775 orders have no item rows.  
+These represent incomplete lifecycles and are excluded from analytical fact tables.
+
+This decision is documented before modeling.
 
 ---
 
-### 3. Canonical Order-Level Fact Table
+### 3. Canonical Fact Table
 
-File: `sql/01_build_orders_fact.sql`  
+File: `sql/marts/01_build_orders_fact.sql`  
 Report: `reports/01_orders_fact.md`
 
 Definition:
 
-Completed order = order_status = 'delivered'
+Completed order = order_status = delivered
 
 The `orders_fact` table:
 
-- One row per delivered order
-- Excludes orders without item rows
-- Aggregates item-level data to order level
-- Aggregates payment data to order level
-- Adds lifecycle metrics such as:
-  - delivery_days
-  - approval_days
+- One row per delivered order  
+- Excludes orders without item rows  
+- Aggregates item-level data to order level  
+- Aggregates payment data  
+- Adds lifecycle metrics such as delivery_days and approval_days  
 
 Result:
-96,478 delivered orders with valid item data.
+96,478 delivered and valid orders.
+
+This table is the analytical core of the project.
 
 ---
 
-### 4. Revenue Consistency Check
+### 4. Dimension Tables
 
-File: `sql/02_check_payments_vs_gross.sql`  
-Report: `reports/02_check_payments_vs_gross.md`
+Built from the fact layer:
 
-Goal:
+- dim_customers  
+- dim_customers_unique  
+- dim_sellers  
+- dim_products  
+
+Each dimension:
+
+- Has a clearly defined grain  
+- Includes validation checks  
+- Preserves revenue consistency  
+
+Grain checks confirm one row per entity.  
+Total checks confirm no revenue distortion.
+
+---
+
+### 5. Revenue Consistency Validation
+
+File: `sql/checks/02_check_payments_vs_gross.sql`
+
+Purpose:
 Measure differences between:
 
-- order_gross_value (item price + freight)
-- payment_value_total (actual payments)
+- Calculated gross order value  
+- Actual payment totals  
 
-Findings:
-The vast majority of orders match within small rounding tolerance.
-A small number of orders show larger discrepancies, requiring explicit metric choice.
+Finding:
+The vast majority of orders match within small rounding tolerance.  
+Edge cases are measured and documented.
 
----
-
-## Key Design Principles
-
-- Raw data is never modified
-- Every modeling decision is documented
-- Each SQL layer has a corresponding report
-- Analytical definitions are explicit and reproducible
-- Revenue metric decisions are based on measured evidence
+Revenue metrics are not assumed. They are verified.
 
 ---
 
-## Next Steps
+### 6. KPI Summary
 
-- Inspect revenue discrepancies in detail
-- Decide authoritative revenue metric
-- Build KPI layer on top of orders_fact
-- Introduce customer-level and seller-level aggregates
-- Perform lifecycle timing analysis
+File: `sql/marts/07_kpi_order_lifecycle_summary.sql`  
+Report: `reports/marts/07_kpi_order_lifecycle_summary.md`
+
+One-row business summary including:
+
+- Total delivered orders  
+- Total gross and paid revenue  
+- Average order value  
+- Average delivery time  
+- Total customers  
+- Repeat customer rate  
+- Total sellers  
+- Total products  
+
+This provides an executive-level overview of marketplace performance.
+
+---
+
+## Design Principles
+
+- Raw data is immutable  
+- All modeling decisions are documented  
+- Grain is explicitly defined  
+- Revenue is validated before analysis  
+- Each transformation step is reproducible  
+- Checks are integrated into the pipeline  
+
+This is an analytics engineering project, not a dashboard project.
+
+---
+
+## How to Run
+
+Place Kaggle CSV files into data/raw before running the pipeline.
+
+1. Activate virtual environment  
+2. Run the full pipeline  
+
+```bash
+python scripts/run_pipeline.py
+```
+
+## Production considerations
+
+In a production setting, this pipeline would include:
+
+- Automated ingestion runs with environment-specific configuration  
+- Data quality checks that fail the pipeline on critical integrity breaks  
+- Scheduled orchestration and run logs for traceability  
+- Versioned analytical models and reproducible builds  
+- Alerting for metric drift and coverage changes such as missing item lines or payment anomalies  
+
+The core modeling approach would remain similar.
+The difference would be operational controls, monitoring, and repeatable execution.
+
+---
+
+## Conclusion
+
+This project is built around a simple idea:
+analytics is only as reliable as the definitions and validation steps behind it.
+
+So far, the work shows that:
+
+- Raw data must be ingested without hidden transformations  
+- Data completeness issues must be measured and documented  
+- Completed order definitions must be explicit  
+- Order-level facts should be constructed in a dedicated analytical layer  
+- Revenue-related fields must be validated before KPI reporting  
+
+With these foundations in place, the next steps can focus on business questions
+without needing to re-litigate what the data represents.
